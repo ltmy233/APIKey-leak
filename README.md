@@ -107,7 +107,7 @@ python APIKey_leak.py \
 
 ## 多 Token 怎么来
 
-一个 GitHub 账号可以创建多个 classic token，每个都有独立的 30 次/分钟搜索额度。5 个 Token = 150 次/分钟，速度翻 5 倍。
+多个 token 可以分摊请求频率，避免单个 token 被限流。但同账号的 token 共享 `code_search` 额度（10次/分钟），所以并发上不去时不必强求更多 token。
 
 ## 免责声明
 
