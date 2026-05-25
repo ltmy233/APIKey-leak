@@ -82,7 +82,7 @@ PROVIDERS: dict[Provider, ProviderDef] = {
         validation_url="https://api.openai.com/v1/models", models_url="https://api.openai.com/v1/models",
         balance_url="https://api.openai.com/v1/dashboard/billing/subscription"),
     Provider.DEEPSEEK: ProviderDef(Provider.DEEPSEEK,
-        patterns=[r'sk-[a-f0-9]{32}'],
+        patterns=[r'sk-[A-Fa-f0-9]{32}'],
         search_queries=['"sk-" "deepseek"',"DEEPSEEK_API_KEY","DEEPSEEK_KEY",'"sk-" "api.deepseek.com"'],
         validation_url="https://api.deepseek.com/v1/models", models_url="https://api.deepseek.com/v1/models",
         balance_url="https://api.deepseek.com/user/balance"),
@@ -205,7 +205,7 @@ def classify_key(key):
     if l.startswith("r8_"): return Provider.REPLICATE
     if l.startswith("pa-"): return Provider.VOYAGE
     if l.startswith("aiza"): return Provider.GOOGLE_AI
-    if re.match(r'^sk-[a-f0-9]{32}$',key): return Provider.DEEPSEEK
+    if re.match(r'^sk-[A-Fa-f0-9]{32}$',key): return Provider.DEEPSEEK
     if l.startswith("sk-"): return Provider.OPENAI
     return None
 
@@ -251,7 +251,6 @@ async def _wait_rate():
             wait = _search_ts[0] - cutoff + random.uniform(1, 5)
             if wait > 0:
                 await asyncio.sleep(wait)
-                _search_ts.clear()
         _search_ts.append(time.time())
 
 async def _do_search(session, query, page, page_size, token_idx, token_str):
@@ -284,8 +283,11 @@ async def _do_search(session, query, page, page_size, token_idx, token_str):
 
 async def fetch_file(session, item):
     name=item["repository"]["full_name"]; path=item["path"]
+    html_url=item.get("html_url",""); branch="main"
+    m=re.search(r'/blob/([^/]+)/',html_url)
+    if m: branch=m.group(1)
     try:
-        async with session.get(f"{RAW_BASE}/{name}/main/{path}", timeout=aiohttp.ClientTimeout(total=10)) as r:
+        async with session.get(f"{RAW_BASE}/{name}/{branch}/{path}", timeout=aiohttp.ClientTimeout(total=10)) as r:
             if r.status!=200: return None
             return await r.text()
     except: return None
@@ -297,7 +299,8 @@ def extract_keys(text, pdef):
             k=m.group(0)
             if len(k)<10: continue
             if k.count("-")==0 and len(k)<20: continue
-            if any(x in k.lower() for x in ("your_","example","xxx","test_key","placeholder","<")): continue
+            kl=k.lower()
+            if any(x in kl for x in ("your_","example","xxx","test_key","placeholder","<","abc123","abcdef","123456","qwerty","none")): continue
             found.add(k)
     return found
 
@@ -450,11 +453,12 @@ async def _search_pages(session, query, start_page, end_page, token_idx, on_page
             _update_token(token_idx, remain, reset_ts)
             if status == 422:
                 return items
-            if status == 403:
+            if status == 403 or status == 429:
                 wait = max(reset_ts - time.time(), 5)
                 await asyncio.sleep(wait)
                 continue
             if status != 200:
+                await asyncio.sleep(2 ** retry)
                 continue
             items.extend(batch)
             if on_page:
@@ -465,8 +469,6 @@ async def _search_pages(session, query, start_page, end_page, token_idx, on_page
             if random.random() < 0.15:
                 await asyncio.sleep(random.uniform(1, 3))
             break
-        else:
-            return items
     return items
 
 
@@ -477,14 +479,12 @@ def _fmt_time(seconds):
     return f"{m:.0f}m{s:.0f}s"
 
 
-async def run_scan(start_page, end_page, concurrency, target, extra_queries=None, days=7):
+async def run_scan(start_page, end_page, concurrency, target, extra_queries=None):
     global SEMAPHORE
     SEMAPHORE = asyncio.Semaphore(concurrency)
     stats = ScanStats(start_page=start_page, end_page=end_page, start_time=datetime.now(timezone.utc).isoformat())
     target = target or list(PROVIDERS.keys())
-    raw = {}; seen_files = set(); vtasks = []; validated = []
-
-    from datetime import timedelta
+    raw = {}; seen_files = set(); fetched_files = set(); vtasks = []; validated = []
 
     base_q = 0
     for pe in target:
@@ -493,29 +493,25 @@ async def run_scan(start_page, end_page, concurrency, target, extra_queries=None
         if CUSTOM_QUERIES: qs.extend(CUSTOM_QUERIES)
         base_q += len(qs)
 
-    fallback_chain = sorted(set([days, 30, 90, 365, 3650]))
-    effective_days = days
-
     token_pool = _AsyncTokenPool(TOKEN_POOL)
     n_tokens = len(TOKEN_POOL)
 
     names = ", ".join(PROVIDER_CN.get(p.value, p.value) for p in target)
-    date_cut = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     print(f"\n  {c('B', '═' * 55)}")
     print(f"  {c('bold', '目标:')} {c('W', names)}")
-    print(f"  {c('bold', '日期:')} {c('W', f'近{days}天 (≥{date_cut})')}  {c('K', '│')}  {c('bold', '页码:')} {c('W', f'{start_page}-{end_page}')}")
+    print(f"  {c('bold', '页码:')} {c('W', f'{start_page}-{end_page}')}")
     sort_info = f"{SORT_FIELD}/{SORT_ORDER}" if SORT_FIELD else "最佳匹配"
-    print(f"  {c('bold', 'Token池:')} {c('W', str(n_tokens))}  {c('K', '│')}  {c('bold', '限速:')} {c('W', f'{SEARCH_RATE}次/分')}  {c('K', '│')}  {c('bold', '检索:')} {c('W', f'{base_q}×{days}天={base_q*days}次')}  {c('K', '│')}  {c('bold', '并发:')} {c('W', str(concurrency))}")
+    print(f"  {c('bold', 'Token池:')} {c('W', str(n_tokens))}  {c('K', '│')}  {c('bold', '限速:')} {c('W', f'{SEARCH_RATE}次/分')}  {c('K', '│')}  {c('bold', '检索:')} {c('W', f'{base_q}次')}  {c('K', '│')}  {c('bold', '并发:')} {c('W', str(concurrency))}")
     print(f"  {c('bold', '排序:')} {c('W', sort_info)}")
     print(f"  {c('B', '═' * 55)}\n")
     print(f"  {c('C', '[>]')} {c('C', '开始检索')}\n")
 
-    connector = aiohttp.TCPConnector(limit=2, limit_per_host=2, force_close=False, enable_cleanup_closed=True, keepalive_timeout=60)
+    connector = aiohttp.TCPConnector(limit=20, limit_per_host=8, force_close=False, enable_cleanup_closed=True, keepalive_timeout=60)
     async with aiohttp.ClientSession(connector=connector, headers={"Accept-Encoding": "gzip, deflate, br"}) as session:
         async def fetch_and_extract(item, pe):
             fn = item["repository"]["full_name"]; fp = item["path"]
-            if (fn, fp) in seen_files: return []
-            seen_files.add((fn, fp))
+            if (fn, fp) in fetched_files: return []
+            fetched_files.add((fn, fp))
             ct = await fetch_file(session, item)
             if not ct: return []
             ru = item["repository"]["html_url"]
@@ -551,122 +547,100 @@ async def run_scan(start_page, end_page, concurrency, target, extra_queries=None
         print(f"  {c('K', '─' * 50)}")
         print()
 
-        prev_try_days = days
+        # 组装搜索任务
+        search_tasks = []
+        for provider_enum in target:
+            pdef = PROVIDERS[provider_enum]
+            queries = list(pdef.search_queries)
+            if extra_queries: queries.extend(extra_queries)
+            if CUSTOM_QUERIES: queries.extend(CUSTOM_QUERIES)
+            for q in queries:
+                search_tasks.append((provider_enum, pdef, q))
 
-        for attempt, try_days in enumerate(fallback_chain):
-            if attempt > 0:
-                _say(f"  {c('Y', '[!]')} 近{prev_try_days}天未发现任何结果，自动扩大至 {c('W', f'近{try_days}天')} ...")
-                print()
+        total_tasks = len(search_tasks)
+        stats.queries_run += total_tasks
+        search_sem = asyncio.Semaphore(min(concurrency, n_tokens * 5))
 
-            # 日期分片
-            date_slices = []
-            for i in range(try_days):
-                day_end = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-                day_start = (datetime.now() - timedelta(days=i + 1)).strftime("%Y-%m-%d")
-                date_slices.append((f"pushed:{day_start}..{day_end}", f"{day_start}"))
+        completed = 0
+        found_total = 0
+        pages_done = 0
+        total_pages = total_tasks * (end_page - start_page + 1)
 
-            # 组装搜索任务
-            search_tasks = []
-            for provider_enum in target:
-                pdef = PROVIDERS[provider_enum]
-                queries = list(pdef.search_queries)
-                if extra_queries: queries.extend(extra_queries)
-                if CUSTOM_QUERIES: queries.extend(CUSTOM_QUERIES)
-                for q in queries:
-                    for date_filter, date_label in date_slices:
-                        search_tasks.append((provider_enum, pdef, f"{q} {date_filter}", date_label))
+        def _status():
+            ts = token_pool.status_line()
+            pg = f"{pages_done}/{total_pages}" if total_pages else "?"
+            _upd(f"{c('K', 'Token[')}{ts}{c('K', ']')}  {c('K', '│')}  {c('C', f'页:{pg}')}  {c('K', '│')}  {c('G', f'命中:{found_total}')}  {c('Y', f'有效:{stats.keys_valid}')}  {c('C', f'验证中:{len(vtasks)}')}")
 
-            total_tasks = len(search_tasks)
-            stats.queries_run += total_tasks
-            # 并发搜索
-            search_sem = asyncio.Semaphore(min(concurrency, n_tokens * 5))
+        _status()
 
-            completed = 0
-            found_total = 0
-            pages_done = 0
-            total_pages = total_tasks * (end_page - start_page + 1)
+        async def search_worker(task):
+            provider_enum, pdef, full_query = task
+            idx, tk = await token_pool.acquire()
+            try:
+                async def _page_done():
+                    nonlocal pages_done
+                    pages_done += 1
+                    _status()
+                items = await _search_pages(session, full_query, start_page, end_page, idx, on_page=_page_done)
+                return items, provider_enum
+            finally:
+                token_pool.release(idx)
 
-            def _status():
-                ts = token_pool.status_line()
-                pg = f"{pages_done}/{total_pages}" if total_pages else "?"
-                _upd(f"{c('K', 'Token[')}{ts}{c('K', ']')}  {c('K', '│')}  {c('C', f'页:{pg}')}  {c('K', '│')}  {c('G', f'命中:{found_total}')}  {c('Y', f'有效:{stats.keys_valid}')}  {c('C', f'验证中:{len(vtasks)}')}")
-
+        async def _run_one(task):
+            nonlocal completed, found_total
+            async with search_sem:
+                result = await search_worker(task)
+            completed += 1
+            items, _ = result
+            found_total += len(items)
             _status()
+            return result
 
-            async def search_worker(task):
-                provider_enum, pdef, full_query, date_label = task
-                idx, tk = await token_pool.acquire()
-                try:
-                    async def _page_done():
-                        nonlocal pages_done
-                        pages_done += 1
-                        _status()
-                    items = await _search_pages(session, full_query, start_page, end_page, idx, on_page=_page_done)
-                    return items, provider_enum
-                finally:
-                    token_pool.release(idx)
+        results = await asyncio.gather(*(_run_one(t) for t in search_tasks), return_exceptions=True)
 
-            async def _run_one(task):
-                nonlocal completed, found_total
-                async with search_sem:
-                    result = await search_worker(task)
-                completed += 1
-                items, _ = result
-                found_total += len(items)
-                _status()
-                return result
+        # 去重合并
+        all_items = []
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            items, provider_enum = r
+            for it in items:
+                fn = it["repository"]["full_name"]
+                fp = it["path"]
+                if (fn, fp) not in seen_files:
+                    seen_files.add((fn, fp))
+                    all_items.append((it, provider_enum))
 
-            results = await asyncio.gather(*(_run_one(t) for t in search_tasks), return_exceptions=True)
+        stats.files_fetched += len(all_items)
 
-            # 去重合并
-            all_items = []
-            for r in results:
-                if isinstance(r, Exception):
-                    continue
-                items, provider_enum = r
-                for it in items:
-                    fn = it["repository"]["full_name"]
-                    fp = it["path"]
-                    if (fn, fp) not in seen_files:
-                        seen_files.add((fn, fp))
-                        all_items.append((it, provider_enum))
+        if all_items:
+            _say(f"  {c('G', '[+]')} {c('G', f'共命中 {len(all_items)} 个文件')}，开始提取密钥 ...")
 
-            stats.files_fetched += len(all_items)
-
-            if all_items:
-                # 提取密钥
-                _say(f"  {c('G', '[+]')} {c('G', f'共命中 {len(all_items)} 个文件')}，开始提取密钥 ...")
-
-                for batch in batched(all_items, 30):
-                    br = await asyncio.gather(*(fetch_and_extract(it, pe) for it, pe in batch), return_exceptions=True)
-                    for result in br:
-                        if isinstance(result, Exception):
-                            continue
-                        for key_text, repo_url, file_path, cls in result:
-                            if key_text not in raw:
-                                raw[key_text] = (repo_url, file_path, cls)
-                                stats.raw_keys_found += 1
-                                stats.keys_tested += 1
-                                await schedule_validation(key_text, repo_url, file_path, cls)
-                    done = [t for t in vtasks if t.done()]
-                    for t in done:
-                        try:
-                            r = t.result()
-                            if isinstance(r, ValidatedKey):
-                                validated.append(r)
-                                stats.keys_valid += 1
-                        except:
-                            pass
-                    vtasks = [t for t in vtasks if not t.done()]
-                    ts = token_pool.status_line()
-                    _upd(f"{c('K', 'Token[')}{ts}{c('K', ']')}  {c('K', '│')}  {c('G', f'已提取:{stats.raw_keys_found}')}  {c('Y', f'有效:{stats.keys_valid}')}  {c('C', f'验证中:{len(vtasks)}')}")
-
-                effective_days = try_days
-                break
-            else:
-                _say(f"  {c('K', '[+]')} {c('K', '未发现匹配项')}")
-
-            prev_try_days = try_days
+            for batch in batched(all_items, 30):
+                br = await asyncio.gather(*(fetch_and_extract(it, pe) for it, pe in batch), return_exceptions=True)
+                for result in br:
+                    if isinstance(result, Exception):
+                        continue
+                    for key_text, repo_url, file_path, cls in result:
+                        if key_text not in raw:
+                            raw[key_text] = (repo_url, file_path, cls)
+                            stats.raw_keys_found += 1
+                            stats.keys_tested += 1
+                            await schedule_validation(key_text, repo_url, file_path, cls)
+                done = [t for t in vtasks if t.done()]
+                for t in done:
+                    try:
+                        r = t.result()
+                        if isinstance(r, ValidatedKey):
+                            validated.append(r)
+                            stats.keys_valid += 1
+                    except:
+                        pass
+                vtasks = [t for t in vtasks if not t.done()]
+                ts = token_pool.status_line()
+                _upd(f"{c('K', 'Token[')}{ts}{c('K', ']')}  {c('K', '│')}  {c('G', f'已提取:{stats.raw_keys_found}')}  {c('Y', f'有效:{stats.keys_valid}')}  {c('C', f'验证中:{len(vtasks)}')}")
+        else:
+            _say(f"  {c('K', '[+]')} {c('K', '未发现匹配项')}")
 
         _say("")
         if vtasks:
@@ -950,15 +924,14 @@ def print_results(results, stats):
     print()
 
 def _print_key_list(results):
-    # 余额汇总
     totals = _compute_balance_totals(results)
     for cur in sorted(totals.keys()):
         amt = totals[cur]
         if abs(amt) < 0.005:
             amt = 0.0
-        print(f"  {cur}总额: {amt:.2f}")
+        c2 = "G" if amt > 0 else "R"
+        print(f"  {cur}总额: {c(c2, f'{amt:.2f}')}")
 
-    # 有效密钥列表
     print(f"  有效key列表:")
     for pn in sorted(results.keys()):
         for vk in results[pn]:
@@ -975,7 +948,6 @@ def parse_args():
     p.add_argument("--concurrency",type=int,default=0)
     p.add_argument("--output",default="api_key_leak_results.json")
     p.add_argument("--csv",default="")
-    p.add_argument("--days",type=int,default=7,help="只搜最近N天提交的仓库，默认7天")
     p.add_argument("--sort",default=None,choices=["indexed",""],help="排序字段，默认indexed。留空=最佳匹配")
     p.add_argument("--order",default=None,choices=["desc","asc"],help="排序方向，默认desc")
     p.add_argument("--search-rate",type=int,default=10,help="代码搜索限速（次/分钟），默认10")
@@ -1052,7 +1024,7 @@ async def main():
 
     results, stats = await run_scan(
         start_page=sp, end_page=ep, concurrency=concurrency,
-        target=target, extra_queries=None, days=args.days)
+        target=target, extra_queries=None)
 
     # 输出
     print_results(results, stats)

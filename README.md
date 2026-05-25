@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 打开 https://github.com/settings/tokens → **Generate new token (classic)** → 不用勾任何权限 → 生成后复制。
 
-Token 越多扫描越快（每人免费额度 30 次/分钟），建议准备 3~5 个。
+Token 越多扫描越快，建议准备 3~5 个。代码搜索共享 10 次/分钟限额，同账号多 Token 不会叠加。
 
 ### 第二步：启动
 
@@ -75,7 +75,6 @@ python APIKey_leak.py \
   --token "ghp_xxx,ghp_yyy,ghp_zzz" \
   --providers OPENAI DEEPSEEK ANTHROPIC \
   --start-page 1 --end-page 5 \
-  --days 7 \
   --csv result.csv \
   --no-interactive
 ```
@@ -86,9 +85,8 @@ python APIKey_leak.py \
 |------|------|------|
 | `--token` | - | GitHub Token，多个逗号分隔 |
 | `--providers` | 全部 | 厂商名，如 `OPENAI DEEPSEEK` |
-| `--start-page` | 1 | 起始页，每页 100 条 |
-| `--end-page` | 3 | 结束页，无上限 |
-| `--days` | 7 | 搜索最近 N 天内的提交 |
+| `--start-page` | 1 | 起始页，每页最多 100 条 |
+| `--end-page` | 3 | 结束页，上限 10 页（GitHub 限制） |
 | `--sort` | `indexed` | 排序字段，留空=最佳匹配 |
 | `--order` | `desc` | `desc` 降序 / `asc` 升序 |
 | `--search-rate` | 10 | 代码搜索限速（次/分钟） |
