@@ -1,4 +1,4 @@
-#Github APIKey leak工具
+# GitHub APIKey 泄漏扫描
 import argparse
 import asyncio
 import hashlib
@@ -941,6 +941,59 @@ def _print_key_list(results):
             print(f"  {vk.key_full}")
     print()
 
+def _save_txt(results, stats, filepath):
+    lines = []
+    lines.append("=" * 60)
+    lines.append("  APIKey Leak 扫描报告")
+    lines.append("=" * 60)
+    lines.append(f"  扫描时间: {stats.start_time} ~ {stats.end_time}")
+    lines.append(f"  查询次数: {stats.queries_run}  获取文件: {stats.files_fetched}")
+    lines.append(f"  原始密钥: {stats.raw_keys_found}  测试数量: {stats.keys_tested}  有效: {stats.keys_valid}")
+    lines.append("")
+
+    totals = _compute_balance_totals(results)
+    if totals:
+        lines.append("  余额汇总:")
+        for cur in sorted(totals.keys()):
+            amt = totals[cur]
+            if abs(amt) < 0.005:
+                continue
+            lines.append(f"    {cur}: {amt:.2f}")
+        lines.append("")
+
+    total = sum(len(v) for v in results.values())
+    lines.append(f"  共 {total} 个有效密钥")
+    lines.append("")
+
+    for pn in sorted(results.keys()):
+        keys = results[pn]
+        cn = PROVIDER_CN.get(pn, pn)
+        lines.append("-" * 60)
+        lines.append(f"  {cn} ({pn})")
+        lines.append(f"  有效: {len(keys)} 个")
+        lines.append("")
+        for i, vk in enumerate(keys, 1):
+            lines.append(f"  [{i}] {vk.key_full}")
+            lines.append(f"      仓库: {vk.repo_url}")
+            lines.append(f"      文件: {vk.file_path}")
+            if vk.models:
+                lines.append(f"      模型: {', '.join(vk.models)}")
+            if vk.balance and vk.balance != "--":
+                lines.append(f"      余额: {vk.balance}")
+            lines.append("")
+        lines.append("")
+
+    lines.append("=" * 60)
+    lines.append("  密钥列表:")
+    lines.append("=" * 60)
+    for pn in sorted(results.keys()):
+        for vk in results[pn]:
+            lines.append(f"  {vk.key_full}")
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"  已保存: {filepath}")
+
 
 # 主入口
 def parse_args():
@@ -959,98 +1012,106 @@ def parse_args():
 
 
 async def main():
-    args = parse_args()
-    show_logo()
-    interactive = not args.no_interactive
+    try:
+        args = parse_args()
+        show_logo()
+        interactive = not args.no_interactive
 
-    # Token
-    t = args.token or ""
-    if not t and interactive:
-        t = input_token()
-    if not t:
-        print(f"{c('R','[!] 无 Token，退出')}"); return
-    global TOKEN_POOL
-    TOKEN_POOL = [x.strip() for x in re.split(r'[,\s]+', t) if x.strip().startswith("ghp_") and not any(p in x.lower() for p in ("xxx","yyy","zzz","example","test_","your_","abc123","def456","ghi789","placeholder","<<","你的"))]
-    for i in range(len(TOKEN_POOL)):
-        TOKEN_STATE[i] = {"reset": 0, "remain": 30}
-    print(f"  {len(TOKEN_POOL)} Token 就绪")
+        # Token
+        t = args.token or ""
+        if not t and interactive:
+            t = input_token()
+        if not t:
+            print(f"{c('R','[!] 无 Token，退出')}"); return
+        global TOKEN_POOL
+        TOKEN_POOL = [x.strip() for x in re.split(r'[,\s]+', t) if x.strip().startswith("ghp_") and not any(p in x.lower() for p in ("xxx","yyy","zzz","example","test_","your_","abc123","def456","ghi789","placeholder","<<","你的"))]
+        for i in range(len(TOKEN_POOL)):
+            TOKEN_STATE[i] = {"reset": 0, "remain": 30}
+        print(f"  {len(TOKEN_POOL)} Token 就绪")
 
-    # 厂商
-    target = []
-    if args.providers:
-        for n in args.providers:
-            try: target.append(Provider[n.upper()])
-            except: print(f"  未知厂商: {n}")
-    if not target and interactive:
-        target = select_providers()
-    if not target:
-        print(f"{c('R','[!] 无厂商，退出')}"); return
-    print(f"  {len(target)} 厂商: {', '.join(PROVIDER_CN.get(p.value, p.value) for p in target)}")
+        # 厂商
+        target = []
+        if args.providers:
+            for n in args.providers:
+                try: target.append(Provider[n.upper()])
+                except: print(f"  未知厂商: {n}")
+        if not target and interactive:
+            target = select_providers()
+        if not target:
+            print(f"{c('R','[!] 无厂商，退出')}"); return
+        print(f"  {len(target)} 厂商: {', '.join(PROVIDER_CN.get(p.value, p.value) for p in target)}")
 
-    # 页码
-    sp = args.start_page
-    ep = args.end_page
-    kw = ""
-    if sp < 1 or ep < 1:
-        if interactive:
-            sp, ep, kw = input_pages()
+        # 页码
+        sp = args.start_page
+        ep = args.end_page
+        kw = ""
+        if sp < 1 or ep < 1:
+            if interactive:
+                sp, ep, kw = input_pages()
+            else:
+                sp, ep = 1, 3
+        sp = max(1, sp); ep = max(sp, ep)
+        print(f"  页码: {sp}-{ep} ({ep-sp+1}页)")
+
+        # 排序
+        global SORT_FIELD, SORT_ORDER
+        if args.sort is not None or args.order is not None:
+            SORT_FIELD = args.sort if args.sort is not None else "indexed"
+            SORT_ORDER = args.order if args.order is not None else "desc"
+        elif interactive:
+            input_sort_order()
+        if SORT_FIELD:
+            print(f"  排序: {SORT_FIELD} / {SORT_ORDER}")
         else:
-            sp, ep = 1, 3
-    sp = max(1, sp); ep = max(sp, ep)
-    print(f"  页码: {sp}-{ep} ({ep-sp+1}页)")
+            print(f"  排序: 最佳匹配")
 
-    # 排序
-    global SORT_FIELD, SORT_ORDER
-    if args.sort is not None or args.order is not None:
-        SORT_FIELD = args.sort if args.sort is not None else "indexed"
-        SORT_ORDER = args.order if args.order is not None else "desc"
-    elif interactive:
-        input_sort_order()
-    if SORT_FIELD:
-        print(f"  排序: {SORT_FIELD} / {SORT_ORDER}")
-    else:
-        print(f"  排序: 最佳匹配")
+        global SEARCH_RATE
+        SEARCH_RATE = args.search_rate
+        concurrency = args.concurrency or 25
 
-    global SEARCH_RATE
-    SEARCH_RATE = args.search_rate
-    concurrency = args.concurrency or 25
+        if interactive:
+            try:
+                cf = input(f"  开始? (y/n): ").strip().lower()
+            except:
+                cf = ""
+            if cf not in ("y", "yes", ""):
+                print("  已取消"); return
+        else:
+            print(f"  {c('K','[自动模式] 直接开始...')}")
 
-    if interactive:
-        try:
-            cf = input(f"  开始? (y/n): ").strip().lower()
-        except:
-            cf = ""
-        if cf not in ("y", "yes", ""):
-            print("  已取消"); return
-    else:
-        print(f"  {c('K','[自动模式] 直接开始...')}")
+        results, stats = await run_scan(
+            start_page=sp, end_page=ep, concurrency=concurrency,
+            target=target, extra_queries=None)
 
-    results, stats = await run_scan(
-        start_page=sp, end_page=ep, concurrency=concurrency,
-        target=target, extra_queries=None)
+        # 输出
+        print_results(results, stats)
+        _print_key_list(results)
+        out={ "scan_stats":asdict(stats),
+              "results":{p:[asdict(vk) for vk in ks] for p,ks in results.items()} }
+        with open(args.output,"w",encoding="utf-8") as f:
+            json.dump(out,f,indent=2,ensure_ascii=False)
+        print(f"  已保存: {args.output}")
 
-    # 输出
-    print_results(results, stats)
-    _print_key_list(results)
-    out={ "scan_stats":asdict(stats),
-          "results":{p:[asdict(vk) for vk in ks] for p,ks in results.items()} }
-    with open(args.output,"w",encoding="utf-8") as f:
-        json.dump(out,f,indent=2,ensure_ascii=False)
-    print(f"  已保存: {args.output}")
+        txt_path = os.path.splitext(args.output)[0] + ".txt"
+        _save_txt(results, stats, txt_path)
 
-    if args.csv:
-        import csv
-        with open(args.csv,"w",newline="",encoding="utf-8-sig") as f:
-            w=csv.writer(f)
-            w.writerow(["厂商","密钥","哈希","仓库","文件","模型数","模型","余额","时间"])
-            for pn in sorted(results.keys()):
-                cn=PROVIDER_CN.get(pn,pn)
-                for vk in results[pn]:
-                    w.writerow([cn,vk.key_full,vk.key_hash,vk.repo_url,vk.file_path,len(vk.models)," | ".join(vk.models),vk.balance,vk.found_at])
-        print(f"  已保存: {args.csv}")
+        if args.csv:
+            import csv
+            with open(args.csv,"w",newline="",encoding="utf-8-sig") as f:
+                w=csv.writer(f)
+                w.writerow(["厂商","密钥","哈希","仓库","文件","模型数","模型","余额","时间"])
+                for pn in sorted(results.keys()):
+                    cn=PROVIDER_CN.get(pn,pn)
+                    for vk in results[pn]:
+                        w.writerow([cn,vk.key_full,vk.key_hash,vk.repo_url,vk.file_path,len(vk.models)," | ".join(vk.models),vk.balance,vk.found_at])
+            print(f"  已保存: {args.csv}")
 
-    total=sum(len(v) for v in results.values())
-    print(f"\n  {c('G', '[*]')} 扫描完毕. {total}个密钥 {len(results)}个厂商\n")
+        total=sum(len(v) for v in results.values())
+        print(f"\n  {c('G', '[*]')} 扫描完毕. {total}个密钥 {len(results)}个厂商\n")
+    finally:
+        # EXE窗口保持
+        if getattr(sys, 'frozen', False):
+            input("\n  按回车键退出...")
 
 if __name__=="__main__":
     try: asyncio.run(main())
