@@ -1,14 +1,22 @@
 # APIKey Leak
 
+## v1.3 桌面版
+
+新增图形化界面，优化扫描并发、重复文件处理、取消响应和异常提示。Windows x64 可直接运行 EXE，无需安装 Python。
+
+- [下载 APIKeyLeak.exe](https://github.com/ltmy233/APIKey-leak/releases/download/v1.3/APIKeyLeak.exe)
+- [下载 SHA-256 校验文件](https://github.com/ltmy233/APIKey-leak/releases/download/v1.3/APIKeyLeak.exe.sha256)
+- [查看 v1.3 发行页面](https://github.com/ltmy233/APIKey-leak/releases/tag/v1.3) · [更新说明](docs/release-v1.3.md) · [验证记录](docs/verification-2026-11-01.md)
+
 ## 新增：授权仓库自查 ClickGUI
 
 基于 **PySide6** 的原生桌面界面，支持指定 GitHub 用户后勾选其公开仓库，或直接指定单个仓库。新 GUI **仅离线识别疑似泄漏**：不会调用发现的密钥验证有效性，不查询模型或余额，也不导出完整密钥。
 
 ### 安装和启动
 
-Windows 桌面版可从仓库 **Releases → v1.3** 下载 `APIKeyLeak.exe`，双击即可启动，不需要安装 Python。本机构建产物位于 `dist\APIKeyLeak.exe`，项目已放在桌面的 `APIKey-leak` 文件夹。程序使用项目原有图标。
+从上方下载 `APIKeyLeak.exe`，双击即可启动，不需要安装 Python。自行从源码构建时，产物位于项目内的 `dist\APIKeyLeak.exe`。程序使用项目原有图标。
 
-EXE 为本机打包的未签名版本，Windows 可能提示未知发布者；请核对来源，不要关闭系统安全防护。首次启动需要解压运行库，可能比后续启动慢。仅在 Windows x64 上构建和验证。
+EXE 为未签名版本，Windows 可能提示未知发布者；请核对来源，不要关闭系统安全防护。首次启动需要解压运行库，可能比后续启动慢。仅在 Windows x64 上构建和验证。
 
 ### 从源码运行
 

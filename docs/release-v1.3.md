@@ -10,6 +10,6 @@
 - 优化敏感信息脱敏和部分扫描报告，保留覆盖统计与任务状态。
 
 ## 使用说明
-- 下载 `APIKeyLeak.exe` 后双击运行；`APIKeyLeak.exe.sha256` 用于校验文件。
+- 从 [v1.3 发行页面](https://github.com/ltmy233/APIKey-leak/releases/tag/v1.3) 下载 `APIKeyLeak.exe` 后双击运行；`APIKeyLeak.exe.sha256` 用于校验文件。
 - 新 GUI 用于自有或已授权仓库自查，只进行离线特征识别，不验证发现的密钥、不查询余额。
-- EXE 未签名；源码与旧命令行入口保留。验证记录和构建方式见仓库 README。
+- EXE 未签名；源码与旧命令行入口保留。[验证记录](verification-2026-11-01.md)和[构建方式](../README.md#重新构建-exe)均可在仓库查看。

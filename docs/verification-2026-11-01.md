@@ -4,7 +4,7 @@
 
 仓库：`ltmy233/APIKey-leak`，分支 `master`。
 
-本地目录：桌面 `APIKey-leak` 文件夹，已从原工作目录整体移动，未覆盖桌面既有项目。
+验证时项目位于桌面 `APIKey-leak` 文件夹，曾从原工作目录整体移动，未覆盖桌面既有项目。此处记录的是验证环境，不代表该本地副本需要长期保留；源码以 GitHub 仓库为准，EXE 和校验文件见 [v1.3 Releases](https://github.com/ltmy233/APIKey-leak/releases/tag/v1.3)。
 
 最初 Git HTTPS 克隆受失效代理和网络超时影响，源码通过 GitHub 官方 codeload 的 `master` 压缩包取得。后续在用户要求更新远端时，已成功 fetch 真实 `origin/master`，将原无效 HEAD 接回上游提交，未覆盖工作树文件、未新建伪造历史。旧 CLI 函数体、共享厂商配置、图标及 CLI 依赖均与上游基线核对。
 
