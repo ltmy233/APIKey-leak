@@ -1,0 +1,2 @@
+-r requirements-gui.txt
+PyInstaller>=6.21,<7

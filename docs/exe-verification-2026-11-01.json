@@ -1,0 +1,14 @@
+﻿{
+    "date":  "2026-11-01",
+    "executable":  "dist/APIKeyLeak.exe",
+    "bytes":  54947012,
+    "sha256":  "3c01079697f8da9bfc25dc61748d508e1a8d7eacf77af98da4c8294cb33c2853",
+    "standalone_working_directory":  true,
+    "platform":  "windows",
+    "window_width":  1395,
+    "window_height":  885,
+    "message_loop_responds":  true,
+    "native_controls_observed":  91,
+    "scan_workflow":  "source Qt integration tests and separate real GitHub scan; full packaged workflow automation inconclusive",
+    "clean_exit":  true
+}

@@ -7,3 +7,10 @@ dist/
 *.spec
 *.exe
 *results*
+.pytest_cache/
+.coverage
+htmlcov/
+key-audit-*.csv
+key-audit-*.txt
+build-output.log
+docs/superpowers/

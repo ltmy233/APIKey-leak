@@ -1,0 +1,16 @@
+{
+  "repository": "ltmy233/APIKey-leak",
+  "default_branch": "master",
+  "summary": {
+    "repositories_done": 1,
+    "repositories_failed": 0,
+    "files_total": 5,
+    "files_scanned": 4,
+    "files_skipped": 1,
+    "files_failed": 0,
+    "findings": 0,
+    "elapsed": 2.26751580000564
+  },
+  "provider_requests": 0,
+  "raw_findings_saved": false
+}
